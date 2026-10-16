@@ -71,3 +71,14 @@ export async function fetchMT5Status() {
     };
   }
 }
+
+export async function searchBookAgent(query) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/book_agent?query=${encodeURIComponent(query)}`);
+    if (!res.ok) throw new Error('Book agent request error');
+    return await res.json();
+  } catch (err) {
+    console.warn('Backend book agent unavailable, using direct client agent:', err);
+    return null;
+  }
+}
