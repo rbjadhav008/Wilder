@@ -1,0 +1,9 @@
+{
+  "appId": "com.wilder.assistant",
+  "appName": "WILDER",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https"
+  }
+}
