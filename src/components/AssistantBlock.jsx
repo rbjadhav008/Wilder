@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { ArrowLeft, Send, Sparkles, Volume2, Bot, User, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, Send, Sparkles, Volume2, Bot, User, CheckCircle2, BookOpen, Heart } from 'lucide-react';
 import { speakAlarmText } from '../utils/alarm';
 
-export default function AssistantBlock({ onBack, liveData }) {
+export default function AssistantBlock({ onBack, onOpenStoryteller, liveData }) {
   const [messages, setMessages] = useState([
     {
       sender: 'wilder',
@@ -12,10 +12,10 @@ export default function AssistantBlock({ onBack, liveData }) {
   const [inputText, setInputText] = useState('');
 
   const quickPrompts = [
+    '📖 Tell Me a Story Like My Granny',
     'Active Trade Positions?',
     'Is Macro News Safe Today?',
-    'Current Gold (XAUUSD) Bias?',
-    'What Did the AI Learn from Past Mistakes?'
+    'Current Gold (XAUUSD) Bias?'
   ];
 
   const handleSend = (textToSend = null) => {
@@ -38,8 +38,9 @@ export default function AssistantBlock({ onBack, liveData }) {
       } else if (lower.includes('gold') || lower.includes('bias')) {
         const price = liveData?.price ? `$${Number(liveData.price).toFixed(2)}` : '$4,172.50';
         reply = `📈 Gold (XAUUSD): Currently trading at ${price} with confirmed BULLISH structural bias. Primary institutional liquidity objective is PDH and unmitigated H1 Order Blocks.`;
-      } else if (lower.includes('learn') || lower.includes('mistake') || lower.includes('mastery')) {
-        reply = '🧠 Autonomous AI Learning: The model discovered that isolated 5-minute Order Blocks fail 48% of the time without H1 confirmation. Model B (M1 FVG retracement) reduced drawdown by 68%.';
+      } else if (lower.includes('granny') || lower.includes('story') || lower.includes('book') || lower.includes('read')) {
+        reply = '📖 Opening your Granny Storyteller! You can upload any book copy or test our preloaded 1-page bedtime stories. Your microphone is open—say "STOP" or "CLOSED" or tap your screen anytime to cancel.';
+        if (onOpenStoryteller) setTimeout(onOpenStoryteller, 1000);
       } else {
         reply = `⚡ Understood Rushi! I have recorded this in your WILDER personal assistant memory. All market scanners, trade alarms, and portfolio defenses are running 24/7.`;
       }
@@ -108,6 +109,65 @@ export default function AssistantBlock({ onBack, liveData }) {
             <span className="pulse-dot" style={{ background: '#c084fc', boxShadow: '0 0 10px #c084fc' }}></span>
             VOICE SYNTHESIS READY
           </span>
+        </div>
+
+        {/* Granny Storyteller Integrated Feature Banner */}
+        <div 
+          onClick={onOpenStoryteller}
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '12px 18px',
+            borderRadius: '12px',
+            background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.18), rgba(217, 119, 6, 0.12))',
+            border: '1px solid rgba(245, 158, 11, 0.4)',
+            marginBottom: '18px',
+            cursor: 'pointer',
+            flexWrap: 'wrap',
+            gap: '10px'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{
+              width: '36px',
+              height: '36px',
+              borderRadius: '10px',
+              background: 'rgba(245, 158, 11, 0.25)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#f59e0b'
+            }}>
+              <BookOpen size={18} />
+            </div>
+            <div>
+              <div style={{ fontSize: '0.88rem', fontWeight: 800, color: '#fef3c7' }}>
+                Granny Storyteller &amp; Book Reader
+              </div>
+              <div style={{ fontSize: '0.74rem', color: 'rgba(254, 243, 199, 0.75)' }}>
+                Upload any book copy or test 1-page bedtime stories. Mic stays open—say "STOP" / "CLOSED" anytime.
+              </div>
+            </div>
+          </div>
+          <button 
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onOpenStoryteller) onOpenStoryteller();
+            }}
+            style={{
+              fontSize: '0.76rem',
+              padding: '6px 14px',
+              background: '#f59e0b',
+              color: '#000',
+              fontWeight: 800,
+              borderRadius: '8px',
+              border: 'none',
+              cursor: 'pointer'
+            }}
+          >
+            Open Storyteller
+          </button>
         </div>
 
         {/* Quick Suggestion Chips */}

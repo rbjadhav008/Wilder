@@ -136,6 +136,10 @@ export default function App() {
               setActiveTab('home');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
+            onOpenStoryteller={() => {
+              setActiveTab('storyteller');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
             liveData={liveData}
           />
         )}
