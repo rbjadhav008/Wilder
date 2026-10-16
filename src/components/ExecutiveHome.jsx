@@ -11,7 +11,9 @@ import {
   Volume2, 
   CheckCircle2, 
   Clock, 
-  AlertCircle 
+  AlertCircle,
+  BookOpen,
+  Heart
 } from 'lucide-react';
 
 export default function ExecutiveHome({ onOpenBlock, liveData, onSpeakBriefing }) {
@@ -293,14 +295,16 @@ export default function ExecutiveHome({ onOpenBlock, liveData, onSpeakBriefing }
           </div>
         </div>
 
-        {/* BLOCK 4: EXECUTIVE SCHEDULE & TIME (UPCOMING MODULE) */}
+        {/* BLOCK 4: GRANNY STORYTELLER & BOOK READER (ACTIVE) */}
         <div 
+          onClick={() => onOpenBlock('storyteller')}
           className="glass-panel" 
           style={{
             padding: '24px',
-            opacity: 0.82,
-            border: '1px dashed rgba(255, 255, 255, 0.15)',
-            background: 'rgba(15, 23, 42, 0.5)'
+            cursor: 'pointer',
+            border: '1px solid rgba(245, 158, 11, 0.45)',
+            background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.9), rgba(245, 158, 11, 0.1))',
+            boxShadow: '0 8px 30px rgba(245, 158, 11, 0.12)'
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
@@ -308,26 +312,41 @@ export default function ExecutiveHome({ onOpenBlock, liveData, onSpeakBriefing }
               width: '50px',
               height: '50px',
               borderRadius: '14px',
-              background: 'rgba(255, 255, 255, 0.05)',
+              background: 'linear-gradient(135deg, rgba(217, 119, 6, 0.35), rgba(245, 158, 11, 0.2))',
+              border: '1px solid rgba(245, 158, 11, 0.5)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              color: '#94a3b8'
+              color: '#f59e0b'
             }}>
-              <Calendar size={24} />
+              <BookOpen size={24} />
             </div>
-            <span className="badge-pill badge-amber">FUTURE INTEGRATION</span>
+            <span className="badge-pill" style={{
+              background: 'rgba(245, 158, 11, 0.2)',
+              color: '#f59e0b',
+              border: '1px solid rgba(245, 158, 11, 0.4)'
+            }}>
+              <Heart size={12} style={{ fill: '#f59e0b' }} />
+              <span>GRANNY VOICE ACTIVE</span>
+            </span>
           </div>
 
-          <h4 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#e2e8f0', marginBottom: '6px' }}>
-            Executive Schedule &amp; Day Planner
+          <h4 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#fff', marginBottom: '6px' }}>
+            Granny Storyteller &amp; Book Reader
           </h4>
-          <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '18px', lineHeight: 1.5 }}>
-            Will organize your personal agenda, daily meetings, London/NY Kill Zone reminders, and life habits automatically.
+          <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '18px', lineHeight: 1.5 }}>
+            Upload any book copy or test preloaded 1-page bedtime stories. Narrates in warm English like your grandmother. Live mic interrupts on <strong style={{ color: '#f59e0b' }}>"STOP"</strong> or <strong style={{ color: '#f59e0b' }}>"CLOSED"</strong>, or tap to cancel.
           </p>
-          <span style={{ fontSize: '0.75rem', color: '#fbbf24', fontWeight: 600 }}>
-            ⏳ Architecture Provisioned for Future Expansion
-          </span>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.78rem', color: '#f59e0b', fontWeight: 700 }}>
+              Test 1-Page Preload Available
+            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#f59e0b', fontWeight: 800, fontSize: '0.88rem' }}>
+              <span>Open Storyteller</span>
+              <ArrowUpRight size={18} />
+            </div>
+          </div>
         </div>
 
         {/* BLOCK 5: SMART AUTOMATIONS & IOT (UPCOMING MODULE) */}

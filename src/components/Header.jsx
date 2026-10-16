@@ -1,5 +1,5 @@
 import React from 'react';
-import { Shield, Bell, Send, Lock, AlertTriangle, Sparkles } from 'lucide-react';
+import { Shield, Bell, Send, Lock, AlertTriangle, Sparkles, BookOpen } from 'lucide-react';
 
 export default function Header({ onLock, onTestAlarm, onNavigate, activeTab }) {
   return (
@@ -58,6 +58,20 @@ export default function Header({ onLock, onTestAlarm, onNavigate, activeTab }) {
           <span className="pulse-dot"></span>
           <span>Cloud 24/7 Active</span>
         </div>
+
+        <button 
+          onClick={() => onNavigate('storyteller')}
+          className="btn-secondary"
+          style={{ 
+            color: '#f59e0b', 
+            borderColor: activeTab === 'storyteller' ? '#f59e0b' : 'rgba(245, 158, 11, 0.4)', 
+            background: activeTab === 'storyteller' ? 'rgba(245, 158, 11, 0.25)' : 'rgba(245, 158, 11, 0.1)' 
+          }}
+          title="Open Granny Storyteller & Book Reader"
+        >
+          <BookOpen size={15} />
+          <span>Granny Storyteller</span>
+        </button>
 
         <button 
           onClick={onTestAlarm}

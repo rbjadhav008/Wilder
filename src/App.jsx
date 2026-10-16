@@ -7,10 +7,11 @@ import SecurityView from './components/SecurityView';
 import SecurityModal from './components/SecurityModal';
 import AlarmOverlay from './components/AlarmOverlay';
 import MobileNav from './components/MobileNav';
+import GrannyStoryteller from './components/GrannyStoryteller';
 
 import { fetchLiveFeed, fetchNotifications } from './services/api';
 import { triggerTradeAlert, stopAlarmSiren, speakAlarmText } from './utils/alarm';
-import { TrendingUp } from 'lucide-react';
+import { TrendingUp, BookOpen } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('home');
@@ -146,6 +147,15 @@ export default function App() {
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
             onTestAlarm={handleTestAlarm}
+          />
+        )}
+
+        {activeTab === 'storyteller' && (
+          <GrannyStoryteller
+            onBack={() => {
+              setActiveTab('home');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
           />
         )}
       </main>

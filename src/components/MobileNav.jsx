@@ -1,11 +1,12 @@
 import React from 'react';
-import { Home, TrendingUp, Bot, Shield, Send } from 'lucide-react';
+import { Home, TrendingUp, Bot, Shield, Send, BookOpen } from 'lucide-react';
 
 export default function MobileNav({ activeTab, onNavigate }) {
   const navItems = [
     { id: 'home', label: 'WILDER Hub', icon: Home },
     { id: 'trading', label: 'Trading', icon: TrendingUp },
     { id: 'assistant', label: 'Assistant', icon: Bot },
+    { id: 'storyteller', label: 'Storyteller', icon: BookOpen },
     { id: 'security', label: 'Security', icon: Shield },
   ];
 
