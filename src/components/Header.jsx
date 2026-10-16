@@ -1,7 +1,7 @@
 import React from 'react';
-import { Shield, Bell, Send, Lock, AlertTriangle, Sparkles, BookOpen } from 'lucide-react';
+import { Shield, Bell, Send, Lock, AlertTriangle, Sparkles, BookOpen, Download } from 'lucide-react';
 
-export default function Header({ onLock, onTestAlarm, onNavigate, activeTab }) {
+export default function Header({ onLock, onTestAlarm, onNavigate, activeTab, onOpenInstall }) {
   return (
     <header style={{
       display: 'flex',
@@ -58,6 +58,21 @@ export default function Header({ onLock, onTestAlarm, onNavigate, activeTab }) {
           <span className="pulse-dot"></span>
           <span>Cloud 24/7 Active</span>
         </div>
+
+        <button 
+          onClick={onOpenInstall}
+          className="btn-primary"
+          style={{ 
+            fontSize: '0.8rem', 
+            padding: '7px 14px',
+            background: 'linear-gradient(135deg, #0284c7, #38bdf8)',
+            boxShadow: '0 0 15px rgba(56, 189, 248, 0.4)'
+          }}
+          title="Download & Install WILDER App on Mobile"
+        >
+          <Download size={14} />
+          <span>Download App</span>
+        </button>
 
         <button 
           onClick={() => onNavigate('storyteller')}

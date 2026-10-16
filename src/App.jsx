@@ -8,10 +8,11 @@ import SecurityModal from './components/SecurityModal';
 import AlarmOverlay from './components/AlarmOverlay';
 import MobileNav from './components/MobileNav';
 import GrannyStoryteller from './components/GrannyStoryteller';
+import InstallModal from './components/InstallModal';
 
 import { fetchLiveFeed, fetchNotifications } from './services/api';
 import { triggerTradeAlert, stopAlarmSiren, speakAlarmText } from './utils/alarm';
-import { TrendingUp, BookOpen } from 'lucide-react';
+import { TrendingUp, BookOpen, Download } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('home');
@@ -20,9 +21,35 @@ export default function App() {
   const [notifications, setNotifications] = useState([]);
   const [activeAlarmTrade, setActiveAlarmTrade] = useState(null);
   const [isAlarmOpen, setIsAlarmOpen] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
 
   const lastSeenNotifIdRef = useRef(null);
   const isInitialLoadRef = useRef(true);
+
+  // Catch mobile browser install event
+  useEffect(() => {
+    const handler = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  const handleTriggerInstall = () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      deferredPrompt.userChoice.then((choiceResult) => {
+        if (choiceResult.outcome === 'accepted') {
+          console.log('User installed the WILDER PWA app');
+        }
+        setDeferredPrompt(null);
+      });
+    } else {
+      setIsInstallModalOpen(true);
+    }
+  };
 
   // Poll live market feed and notifications
   useEffect(() => {
@@ -99,6 +126,7 @@ export default function App() {
       <Header
         onLock={() => setIsLocked(true)}
         onTestAlarm={handleTestAlarm}
+        onOpenInstall={() => setIsInstallModalOpen(true)}
         onNavigate={(tab) => {
           setActiveTab(tab);
           window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -215,6 +243,14 @@ export default function App() {
         isOpen={isAlarmOpen}
         trade={activeAlarmTrade}
         onSilence={handleSilenceAlarm}
+      />
+
+      {/* Download & Mobile Install Modal */}
+      <InstallModal
+        isOpen={isInstallModalOpen}
+        onClose={() => setIsInstallModalOpen(false)}
+        onInstall={handleTriggerInstall}
+        canPrompt={!!deferredPrompt}
       />
     </div>
   );
