@@ -147,6 +147,99 @@ export default function GrannyStoryteller({ onBack }) {
   const silenceTimerRef = useRef(null);
   const liveTranscriptRef = useRef('');
 
+  // Split story text into clean paragraphs
+  const paragraphs = (customText || '').split('\n\n').filter(p => p.trim().length > 0);
+  paragraphsRef.current = paragraphs;
+
+  // Stop storytelling helper (placed at top to prevent hoisting issues)
+  const stopStorytelling = () => {
+    isPlayingRef.current = false;
+    setIsPlaying(false);
+
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+
+    if (recognitionRef.current) {
+      try { recognitionRef.current.abort(); } catch (e) {}
+      recognitionRef.current = null;
+    }
+    setIsMicListening(false);
+  };
+
+  // Speak helper in Grandma Voice
+  const speakAsGranny = (text, onComplete = null) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      if (onComplete) onComplete();
+      return;
+    }
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = speechSpeed;
+    utterance.pitch = 1.04;
+
+    if (selectedVoiceName && availableVoices.length > 0) {
+      const found = availableVoices.find(v => v.name === selectedVoiceName);
+      if (found) utterance.voice = found;
+    }
+
+    utterance.onend = () => {
+      if (onComplete) onComplete();
+    };
+    utterance.onerror = () => {
+      if (onComplete) onComplete();
+    };
+
+    window.speechSynthesis.speak(utterance);
+  };
+
+  // 1. Initialize Voices & Saved Bookmark
+  useEffect(() => {
+    function loadVoices() {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        const voices = window.speechSynthesis.getVoices();
+        setAvailableVoices(voices);
+
+        const englishVoices = voices.filter(v => v.lang && v.lang.startsWith('en'));
+        const preferred = englishVoices.find(v => 
+          /natural|female|libby|samantha|victoria|karen|moira|grandma|fiona|george|serena/i.test(v.name)
+        ) || englishVoices[0] || voices[0];
+
+        if (preferred && !selectedVoiceName) {
+          setSelectedVoiceName(preferred.name);
+        }
+      }
+    }
+
+    loadVoices();
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+
+    try {
+      const storedBm = localStorage.getItem('wilder_granny_bookmark');
+      if (storedBm) {
+        const parsed = JSON.parse(storedBm);
+        if (parsed && parsed.bookTitle) {
+          setSavedBookmark(parsed);
+        }
+      }
+
+      const storedLib = localStorage.getItem('wilder_saved_books_library');
+      if (storedLib) {
+        const parsedLib = JSON.parse(storedLib);
+        if (Array.isArray(parsedLib) && parsedLib.length > 0) {
+          setSavedLibrary(parsedLib);
+        }
+      }
+    } catch (e) {}
+
+    return () => {
+      stopStorytelling();
+    };
+  }, []);
+
   // Extract clean book title from natural conversational speech
   const extractCleanBookTitle = (text) => {
     let t = (text || '').trim();
@@ -590,20 +683,7 @@ export default function GrannyStoryteller({ onBack }) {
     speakAsGranny(pauseNote);
   };
 
-  const stopStorytelling = () => {
-    isPlayingRef.current = false;
-    setIsPlaying(false);
 
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
-
-    if (recognitionRef.current) {
-      try { recognitionRef.current.abort(); } catch (e) {}
-      recognitionRef.current = null;
-    }
-    setIsMicListening(false);
-  };
 
   // Handle User File Upload (.txt, .md, .pdf text)
   const handleFileUpload = (e) => {

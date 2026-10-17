@@ -14,6 +14,52 @@ import { fetchLiveFeed, fetchNotifications } from './services/api';
 import { triggerTradeAlert, stopAlarmSiren, speakAlarmText } from './utils/alarm';
 import { TrendingUp, BookOpen, Download } from 'lucide-react';
 
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, errorInfo) {
+    console.error("ErrorBoundary caught error:", error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: '36px 20px', textAlign: 'center', color: '#fff', maxWidth: '500px', margin: '40px auto' }}>
+          <div style={{ fontSize: '3rem', marginBottom: '14px' }}>👵</div>
+          <h2 style={{ fontSize: '1.3rem', color: '#f59e0b', fontWeight: 800 }}>Story Room Refreshing</h2>
+          <p style={{ color: '#9ca3af', fontSize: '0.88rem', margin: '10px 0 24px 0', lineHeight: '1.6' }}>
+            Grandma is preparing the library shelves. Tap below to return to the Home Hub.
+          </p>
+          <button 
+            onClick={() => {
+              this.setState({ hasError: false, error: null });
+              if (this.props.onReset) this.props.onReset();
+            }}
+            style={{
+              background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+              color: '#1a1005',
+              border: 'none',
+              borderRadius: '999px',
+              padding: '12px 28px',
+              fontSize: '0.95rem',
+              fontWeight: 800,
+              cursor: 'pointer',
+              boxShadow: '0 4px 15px rgba(245, 158, 11, 0.4)'
+            }}
+          >
+            ← Back to Home Hub
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState('home');
   const [isLocked, setIsLocked] = useState(false);
@@ -183,12 +229,14 @@ export default function App() {
         )}
 
         {activeTab === 'storyteller' && (
-          <GrannyStoryteller
-            onBack={() => {
-              setActiveTab('home');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-          />
+          <ErrorBoundary onReset={() => setActiveTab('home')}>
+            <GrannyStoryteller
+              onBack={() => {
+                setActiveTab('home');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+            />
+          </ErrorBoundary>
         )}
       </main>
 
