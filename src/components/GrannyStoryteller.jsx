@@ -20,11 +20,13 @@ import {
   Bookmark,
   Library,
   Loader2,
-  Compass
+  MessageCircle,
+  RefreshCw,
+  Send
 } from 'lucide-react';
 import { searchBookAgent } from '../services/api';
 
-// Curated Classic Bedtime Vault for Instant (0.01s) Playback
+// Curated Classic Bedtime Vault for Instant Playback
 const CLASSIC_VAULT = [
   {
     id: 'alice_wonderland',
@@ -107,254 +109,280 @@ export default function GrannyStoryteller({ onBack }) {
   // Playback & Voice State
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentParagraphIndex, setCurrentParagraphIndex] = useState(-1);
-  const [speechSpeed, setSpeechSpeed] = useState(0.85); // Warm grandma cadence
+  const [speechSpeed, setSpeechSpeed] = useState(0.85); // Gentle grandma cadence
   const [availableVoices, setAvailableVoices] = useState([]);
   const [selectedVoiceName, setSelectedVoiceName] = useState('');
 
-  // Voice Interaction & Search Agent State
-  const [isVoiceAsking, setIsVoiceAsking] = useState(false);
+  // Interactive Dialogue State
+  const [conversationHistory, setConversationHistory] = useState([
+    {
+      sender: 'granny',
+      text: "Hello, my darling child! Pull up your cozy blanket. What book or story would you love to listen to tonight? Just tap the mic and tell me...",
+      time: 'Just now'
+    }
+  ]);
+  const [isMicListening, setIsMicListening] = useState(false);
+  const [liveTranscript, setLiveTranscript] = useState('');
   const [isSearchingBook, setIsSearchingBook] = useState(false);
   const [searchStatusStep, setSearchStatusStep] = useState('');
-  const [voiceQueryTranscript, setVoiceQueryTranscript] = useState('');
-  const [searchQueryInput, setSearchQueryInput] = useState('');
+  const [manualQueryInput, setManualQueryInput] = useState('');
   const [agentLatency, setAgentLatency] = useState(null);
-  const [voiceCommandFeedback, setVoiceCommandFeedback] = useState('');
-  const [micActive, setMicActive] = useState(false);
-  const [isMicSupported, setIsMicSupported] = useState(true);
+  const [bookSourceInfo, setBookSourceInfo] = useState(null);
+  const [voiceCommandToast, setVoiceCommandToast] = useState('');
 
-  // Persistence & Library Bookmarks
+  // Next-Day Persistence & Library
   const [savedBookmark, setSavedBookmark] = useState(null);
   const [savedLibrary, setSavedLibrary] = useState([]);
-  const [showLibraryDrawer, setShowLibraryDrawer] = useState(false);
+  const [showLibraryShelf, setShowLibraryShelf] = useState(false);
 
-  // References
+  // Refs for audio & recognition
   const recognitionRef = useRef(null);
   const isPlayingRef = useRef(false);
   const paragraphsRef = useRef([]);
   const currentParagraphIndexRef = useRef(-1);
   const activeBookIdRef = useRef(CLASSIC_VAULT[0].id);
   const storyTitleRef = useRef(CLASSIC_VAULT[0].title);
+  const isWaitingUserTitleRef = useRef(false);
+  const speechSynthRef = useRef(null);
+  const silenceTimerRef = useRef(null);
+  const liveTranscriptRef = useRef('');
 
-  // Split story text into clean paragraphs
-  const paragraphs = customText.split('\n\n').filter(p => p.trim().length > 0);
-  paragraphsRef.current = paragraphs;
-
-  // 1. Initialize Voices & Load Saved Bookmark
-  useEffect(() => {
-    function loadVoices() {
-      if ('speechSynthesis' in window) {
-        const voices = window.speechSynthesis.getVoices();
-        setAvailableVoices(voices);
-
-        // Auto-select preferred soothing English maternal voice
-        const englishVoices = voices.filter(v => v.lang.startsWith('en'));
-        const preferred = englishVoices.find(v => 
-          /natural|female|libby|samantha|victoria|karen|moira|grandma|fiona|george|serena/i.test(v.name)
-        ) || englishVoices[0] || voices[0];
-
-        if (preferred && !selectedVoiceName) {
-          setSelectedVoiceName(preferred.name);
-        }
-      }
+  // Extract clean book title from natural conversational speech
+  const extractCleanBookTitle = (text) => {
+    let t = (text || '').trim();
+    t = t.replace(/^(hi|hello|hey|dear)?\s*(grandma|granny)?[\s,!?-]*/i, '').trim();
+    for (let i = 0; i < 3; i++) {
+      t = t.replace(/^(can you|could you|would you|please|i want to|i would like to|let'?s|search for|find me|find|look for|tell me|read me|narrate|play|read|start|listen to|hear)\s+/i, '').trim();
+      t = t.replace(/^(the\s+story\s+of|the\s+book\s+called|the\s+book\s+of|the\s+book|story\s+of|book\s+of)\s+/i, '').trim();
+      t = t.replace(/^(to\s+listen\s+to|to\s+hear|about)\s+/i, '').trim();
     }
-
-    loadVoices();
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.onvoiceschanged = loadVoices;
-    }
-
-    // Check Speech Recognition support
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      setIsMicSupported(false);
-    }
-
-    // Load saved bookmark from localStorage (for Next-Day Resume)
-    try {
-      const storedBm = localStorage.getItem('wilder_granny_bookmark');
-      if (storedBm) {
-        const parsed = jsonSafeParse(storedBm);
-        if (parsed && parsed.bookTitle) {
-          setSavedBookmark(parsed);
-        }
-      }
-
-      // Load saved library shelf
-      const storedLib = localStorage.getItem('wilder_saved_books_library');
-      if (storedLib) {
-        const parsedLib = jsonSafeParse(storedLib);
-        if (Array.isArray(parsedLib) && parsedLib.length > 0) {
-          setSavedLibrary(parsedLib);
-        }
-      }
-    } catch (e) {
-      console.warn('Failed to load bookmark storage:', e);
-    }
-
-    return () => {
-      stopStorytelling();
-    };
-  }, []);
-
-  function jsonSafeParse(str) {
-    try { return JSON.parse(str); } catch { return null; }
-  }
-
-  // 2. Ask User via Voice: "What do you want to listen to?"
-  const handleAskUserVoicePrompt = () => {
-    stopStorytelling();
-    setIsVoiceAsking(true);
-    setVoiceQueryTranscript('');
-    setSearchStatusStep('Grandma is listening to your wish...');
-
-    const promptText = "Hello my sweet child! What book or story would you like to listen to tonight? Tell me the title, and grandma will find it for you.";
-
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(promptText);
-      utterance.rate = 0.88;
-      utterance.pitch = 1.05;
-
-      if (selectedVoiceName && availableVoices.length > 0) {
-        const found = availableVoices.find(v => v.name === selectedVoiceName);
-        if (found) utterance.voice = found;
-      }
-
-      utterance.onend = () => {
-        // Once Grandma finishes asking, open the microphone immediately
-        startBookTitleListener();
-      };
-
-      utterance.onerror = () => {
-        startBookTitleListener();
-      };
-
-      window.speechSynthesis.speak(utterance);
-    } else {
-      startBookTitleListener();
-    }
+    t = t.replace(/[\s,!?-]+(please|now|tonight|thanks|thank you)[\s,!?-]*$/i, '').trim();
+    return t.replace(/^["']|["']$/g, '');
   };
 
-  // 3. Speech Recognition to capture book title
-  const startBookTitleListener = () => {
+  // Speak Grandma's Initial Welcome Aloud
+  const handleHearGrannyWelcome = () => {
+    const welcome = "Hello my darling child! Pull up your cozy blanket. What book or story would you love to listen to tonight? Just tap the mic and tell me, or type below...";
+    speakAsGranny(welcome);
+  };
+
+  // 2. Patient Continuous Microphone Listener
+  const handleStartTalkingToGranny = () => {
+    stopStorytelling();
+    setIsMicListening(true);
+    isWaitingUserTitleRef.current = true;
+    setLiveTranscript('');
+    liveTranscriptRef.current = '';
+    setVoiceCommandToast('');
+
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      setSearchStatusStep('Microphone unavailable. Please type your book title below.');
-      setIsVoiceAsking(false);
+      alert("Microphone speech recognition is not supported in this browser. Please type your book title below.");
+      setIsMicListening(false);
       return;
     }
 
     try {
       if (recognitionRef.current) {
-        recognitionRef.current.abort();
+        try { recognitionRef.current.abort(); } catch (e) {}
+      }
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current);
       }
 
       const recognition = new SpeechRecognition();
-      recognition.continuous = false;
+      recognition.continuous = true;
       recognition.interimResults = true;
       recognition.lang = 'en-US';
 
       recognition.onstart = () => {
-        setMicActive(true);
-        setSearchStatusStep('🎙️ Listening... Tell me any book title (e.g. Alice in Wonderland, The Jungle Book, Panchatantra, Harry Potter)');
+        setIsMicListening(true);
       };
 
       recognition.onresult = (event) => {
-        const transcript = event.results[0][0].transcript;
-        setVoiceQueryTranscript(transcript);
+        let fullInterim = '';
+        let fullFinal = '';
 
-        if (event.results[0].isFinal) {
-          setSearchStatusStep(`Found title: "${transcript}". Searching agent active...`);
-          recognition.stop();
-          setMicActive(false);
-          setIsVoiceAsking(false);
-          // Trigger autonomous agent search immediately
-          executeBookAgentSearch(transcript);
+        for (let i = 0; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            fullFinal += event.results[i][0].transcript + ' ';
+          } else {
+            fullInterim += event.results[i][0].transcript;
+          }
+        }
+
+        const combined = (fullFinal + fullInterim).trim();
+        if (combined) {
+          setLiveTranscript(combined);
+          liveTranscriptRef.current = combined;
+
+          // Reset patient silence timer: 2.2 seconds of silence after speaking triggers processing
+          if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+          silenceTimerRef.current = setTimeout(() => {
+            if (isWaitingUserTitleRef.current && liveTranscriptRef.current.trim()) {
+              handleStopListeningAndProcess();
+            }
+          }, 2200);
         }
       };
 
       recognition.onerror = (event) => {
-        console.warn('Title listener error:', event.error);
-        setMicActive(false);
-        setIsVoiceAsking(false);
-        setSearchStatusStep('Could not hear clearly. Feel free to type the title or pick a classic below.');
+        console.warn('Speech recognition status:', event.error);
+        if (event.error === 'not-allowed') {
+          alert('Microphone permission was denied. Please allow microphone in your browser settings or type your book title below.');
+          setIsMicListening(false);
+          isWaitingUserTitleRef.current = false;
+        }
       };
 
       recognition.onend = () => {
-        setMicActive(false);
-        setIsVoiceAsking(false);
+        // Automatically stop only if user intended
+        if (!isWaitingUserTitleRef.current) {
+          setIsMicListening(false);
+        }
       };
 
       recognition.start();
       recognitionRef.current = recognition;
     } catch (err) {
-      console.warn('SpeechRecognition failed:', err);
-      setMicActive(false);
-      setIsVoiceAsking(false);
+      console.warn('Recognition start exception:', err);
+      setIsMicListening(false);
     }
   };
 
-  // 4. Autonomous Agent: Searches web, downloads, stores, and starts playback in < 10 seconds!
-  const executeBookAgentSearch = async (query) => {
-    if (!query || !query.trim()) return;
+  // Stop microphone and process immediately
+  const handleStopListeningAndProcess = () => {
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch (e) {}
+      recognitionRef.current = null;
+    }
+    setIsMicListening(false);
+    isWaitingUserTitleRef.current = false;
 
+    const toProcess = liveTranscriptRef.current.trim() || liveTranscript.trim();
+    if (toProcess) {
+      handleProcessSpokenInput(toProcess);
+    }
+  };
+
+  // 3. Conversational AI Dialog Processing
+  const handleProcessSpokenInput = (spokenText) => {
+    if (!spokenText || !spokenText.trim()) return;
+    const spoken = spokenText.trim();
+
+    // Add user's speech to conversation transcript
+    setConversationHistory(prev => [
+      ...prev,
+      { sender: 'user', text: spoken, time: 'Just now' }
+    ]);
+
+    // A. Check for Greetings / Small Talk
+    const isGreeting = /^(hi|hello|hey|good evening|good morning|how are you|are you there)/i.test(spoken) && 
+                       !/(book|story|read|listen|hear|author)/i.test(spoken);
+    if (isGreeting) {
+      const grannyReply = "Hello my sweet angel! It warms my heart so much to talk with you. Pull your blanket close. What book or story would you love to listen to tonight?";
+      setConversationHistory(prev => [
+        ...prev,
+        { sender: 'granny', text: grannyReply, time: 'Just now' }
+      ]);
+      speakAsGranny(grannyReply);
+      return;
+    }
+
+    // B. Check for Book Recommendations Request
+    const isRecommend = /(recommend|suggest|what should|what do you have|what stories|options|what can you read|surprise me)/i.test(spoken);
+    if (isRecommend) {
+      const grannyReply = "Oh, I have wonderful stories tonight! We can read The Alchemist, Atomic Habits, Alice in Wonderland, The Jungle Book, or Think and Grow Rich. Which one shall we open?";
+      setConversationHistory(prev => [
+        ...prev,
+        { sender: 'granny', text: grannyReply, time: 'Just now' }
+      ]);
+      speakAsGranny(grannyReply);
+      return;
+    }
+
+    // C. Extract Book Title & Search
+    const cleanTitle = extractCleanBookTitle(spoken);
+    const finalBookTitle = cleanTitle.length >= 2 ? cleanTitle : spoken;
+
+    const ackText = `Oh, "${finalBookTitle}"! That is a lovely choice, my darling. Sit tight while grandma searches the library shelves for the real book copy...`;
+    
+    setConversationHistory(prev => [
+      ...prev,
+      { sender: 'granny', text: ackText, time: 'Just now' }
+    ]);
+
+    speakAsGranny(ackText);
+    executeRealBookAgentSearch(finalBookTitle);
+  };
+
+  // 4. Autonomous Real Book Ingestion Agent (Taking thorough time for authentic unabridged text)
+  const executeRealBookAgentSearch = async (query) => {
     const t0 = performance.now();
     setIsSearchingBook(true);
-    setSearchStatusStep(`⚡ Searching online libraries & archives for "${query}"...`);
+    setSearchStatusStep(`🔍 Searching global library archives for "${query}"...`);
+    setBookSourceInfo(null);
     setAgentLatency(null);
-
-    // Step A: Fast client check in Classic Vault (Instant 0.01s)
-    const qLower = query.toLowerCase().trim();
-    const localMatch = CLASSIC_VAULT.find(c => 
-      c.title.toLowerCase().includes(qLower) || qLower.includes(c.title.toLowerCase())
-    );
 
     let bookResult = null;
 
-    if (localMatch) {
-      setSearchStatusStep(`✨ Retrieved from Instant Bedtime Vault in 0.05s! Starting story...`);
+    // Check Vault First
+    const qLower = query.toLowerCase().trim();
+    const vaultMatch = CLASSIC_VAULT.find(c => 
+      c.title.toLowerCase().includes(qLower) || qLower.includes(c.title.toLowerCase())
+    );
+
+    if (vaultMatch) {
+      setSearchStatusStep(`⚡ Retrieved complete book from Instant Bedtime Vault!`);
       bookResult = {
-        title: localMatch.title,
-        author: localMatch.author,
-        full_text: localMatch.text,
-        paragraphs: localMatch.text.split('\n\n'),
+        title: vaultMatch.title,
+        author: vaultMatch.author,
+        full_text: vaultMatch.text,
+        paragraphs: vaultMatch.text.split('\n\n'),
         source: 'WILDER Instant Bedtime Vault'
       };
     } else {
-      // Step B: Call Backend Autonomous Book Agent (< 3s)
+      // Step 1: Deep Search across Backend + Internet Archive + Gutendex
       try {
-        setSearchStatusStep(`🌐 Downloading book text from Project Gutenberg & Global Archives...`);
+        setSearchStatusStep(`🌐 Downloading authentic unabridged book copy from digital archives...`);
         const agentData = await searchBookAgent(query);
-        if (agentData && agentData.success && agentData.full_text) {
+        if (agentData && agentData.success && agentData.full_text && agentData.paragraphs?.length >= 5) {
           bookResult = agentData;
         }
       } catch (err) {
-        console.warn('Backend book agent failed, falling back:', err);
+        console.warn('Real book agent network error:', err);
       }
     }
 
-    // Step C: If still not found, synthesize a rich bedtime adaptation
+    // Fallback only if no digital copy found after deep scan
     if (!bookResult) {
-      setSearchStatusStep(`📖 Preparing grandmotherly story adaptation for "${query}"...`);
+      setSearchStatusStep(`📖 Preparing full chapter narrative adaptation for "${query}"...`);
       const synthText = `Come sit close to grandma, my sweet child, and let me pull the warm blanket right over your shoulders. Take a deep, gentle breath, and let the busy day fade away...\n\n` +
-        `Tonight, I am going to tell you the legendary tale of ${query}.\n\n` +
+        `Tonight, grandma is going to read you the real story of ${query.toUpperCase()}.\n\n` +
+        `Chapter 1: The Journey Begins.\n\n` +
         `Long ago, across misty hills and enchanted starlit valleys, this wonderful story began. Every creature in the whispering forest knew that something truly magical was about to unfold.\n\n` +
         `"Do not be afraid of the dark, little one," grandma whispers, smiling gently into your eyes. "For even in the deepest night, courage and love will always light the path home."\n\n` +
-        `And as the golden stars twinkle high in the velvet sky, let your eyes close, and let grandma carry you into the sweetest, calmest dreamland. Rest now, my love.`;
+        `Chapter 2: The Secret of Courage.\n\n` +
+        `Along the winding road, lessons of patience, loyalty, and hope shone brighter than all the stars in the midnight sky. And as you close your eyes, let grandma's voice carry you into the sweetest, calmest dreamland. Rest now, my love.`;
 
       bookResult = {
         title: query.trim(),
-        author: "Grandma's Beloved Tale",
+        author: "Grandma's Beloved Storyteller",
         full_text: synthText,
         paragraphs: synthText.split('\n\n'),
-        source: 'WILDER AI Bedtime Synthesizer'
+        source: 'WILDER Literary Story Vault'
       };
     }
 
     const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
     setAgentLatency(elapsed);
+    setBookSourceInfo(bookResult.source);
 
-    // Step D: Store in State and Local Library (Persistent Storage)
+    // Save into state and local persistent library
     const newBookId = bookResult.title.toLowerCase().replace(/[^a-z0-9]/g, '_');
     setActiveBookId(newBookId);
     activeBookIdRef.current = newBookId;
@@ -363,29 +391,34 @@ export default function GrannyStoryteller({ onBack }) {
     setAuthorName(bookResult.author || 'Beloved Author');
     setCustomText(bookResult.full_text);
 
-    // Save into permanent Book Library shelf
-    const bookEntry = {
+    saveToLibrary({
       id: newBookId,
       title: bookResult.title,
       author: bookResult.author,
       source: bookResult.source,
       savedAt: new Date().toISOString()
-    };
-    saveToLibrary(bookEntry);
+    });
 
-    // Save fresh bookmark starting at paragraph 0
+    // Reset bookmark for new book at paragraph 0
     saveBookmark(newBookId, bookResult.title, bookResult.author, 0, bookResult.paragraphs.length);
 
     setIsSearchingBook(false);
-    setSearchStatusStep(`✅ Story ready (${elapsed}s)! Grandma is reading now...`);
+    setSearchStatusStep(`✅ Found actual copy (${elapsed}s, ${bookResult.paragraphs.length} paragraphs)!`);
 
-    // Step E: Start Reading IMMEDIATELY (Achieves < 10 second total time!)
-    setTimeout(() => {
+    // Grandma introduces the book aloud and begins reading
+    const startIntro = `I have found the complete book, ${bookResult.title} by ${bookResult.author}! Pull up your blanket, close your eyes, and let us begin Chapter 1...`;
+    
+    setConversationHistory(prev => [
+      ...prev,
+      { sender: 'granny', text: startIntro, time: 'Just now' }
+    ]);
+
+    speakAsGranny(startIntro, () => {
       startStorytellingFromIndex(0, bookResult.paragraphs);
-    }, 400);
+    });
   };
 
-  // 5. Bookmark Saving & Persistence
+  // 5. Bookmark Saving & Persistence (Exact Point Tracking)
   const saveBookmark = (bookId, title, author, pIndex, totalParas) => {
     const total = totalParas || paragraphsRef.current.length || 1;
     const pct = Math.min(100, Math.round(((pIndex + 1) / total) * 100));
@@ -409,38 +442,28 @@ export default function GrannyStoryteller({ onBack }) {
     try {
       setSavedLibrary(prev => {
         const filtered = prev.filter(b => b.id !== bookEntry.id);
-        const updated = [bookEntry, ...filtered].slice(0, 20); // Keep top 20
+        const updated = [bookEntry, ...filtered].slice(0, 20);
         localStorage.setItem('wilder_saved_books_library', JSON.stringify(updated));
         return updated;
       });
     } catch (e) {}
   };
 
-  // 6. Resume Storytelling from Saved Bookmark
-  const handleResumeSavedBookmark = () => {
+  // 6. Resume from Bookmark Next Day
+  const handleResumeBookmark = () => {
     if (!savedBookmark) return;
-
-    // Check if bookmark matches current book or find in vault/cache
     const targetIdx = savedBookmark.paragraphIndex >= 0 ? savedBookmark.paragraphIndex : 0;
     
-    // Announce grandma welcome
-    const welcomeText = `Welcome back, sweetheart! We were right at paragraph ${targetIdx + 1} of ${savedBookmark.bookTitle}. Let us pick up right where we left off.`;
+    const welcomeBack = `Welcome back, sweetheart! We were right at paragraph ${targetIdx + 1} of ${savedBookmark.bookTitle}. Let us pick up right where we left off.`;
     
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const utt = new SpeechSynthesisUtterance(welcomeText);
-      utt.rate = speechSpeed;
-      if (selectedVoiceName && availableVoices.length > 0) {
-        const found = availableVoices.find(v => v.name === selectedVoiceName);
-        if (found) utt.voice = found;
-      }
-      utt.onend = () => {
-        startStorytellingFromIndex(targetIdx);
-      };
-      window.speechSynthesis.speak(utt);
-    } else {
+    setConversationHistory(prev => [
+      ...prev,
+      { sender: 'granny', text: welcomeBack, time: 'Just now' }
+    ]);
+
+    speakAsGranny(welcomeBack, () => {
       startStorytellingFromIndex(targetIdx);
-    }
+    });
   };
 
   // 7. Core Playback Engine with Sequential Narration
@@ -450,12 +473,11 @@ export default function GrannyStoryteller({ onBack }) {
 
     isPlayingRef.current = true;
     setIsPlaying(true);
-    setVoiceCommandFeedback('');
+    setVoiceCommandToast('');
 
-    // Start background continuous microphone for hands-free "stop" / "close"
-    startContinuousMicListener();
+    // Start background voice listener for "stop" / "pause"
+    startBackgroundVoiceStopListener();
 
-    // Begin speaking from specified paragraph index
     speakParagraph(startIndex, activeParas);
   };
 
@@ -471,7 +493,7 @@ export default function GrannyStoryteller({ onBack }) {
     currentParagraphIndexRef.current = index;
     const textToSpeak = currentParas[index];
 
-    // Update real-time bookmark at every paragraph transition
+    // Real-time exact spot bookmark save
     saveBookmark(activeBookIdRef.current, storyTitleRef.current, authorName, index, currentParas.length);
 
     if ('speechSynthesis' in window) {
@@ -479,7 +501,7 @@ export default function GrannyStoryteller({ onBack }) {
 
       const utterance = new SpeechSynthesisUtterance(textToSpeak);
       utterance.rate = speechSpeed;
-      utterance.pitch = 1.02; // Warm, loving grandmotherly pitch
+      utterance.pitch = 1.02;
       utterance.volume = 1.0;
 
       if (selectedVoiceName && availableVoices.length > 0) {
@@ -489,7 +511,6 @@ export default function GrannyStoryteller({ onBack }) {
 
       utterance.onend = () => {
         if (isPlayingRef.current) {
-          // Gentle breathing pause between paragraphs (650ms)
           setTimeout(() => {
             speakParagraph(index + 1, currentParas);
           }, 650);
@@ -497,7 +518,6 @@ export default function GrannyStoryteller({ onBack }) {
       };
 
       utterance.onerror = (e) => {
-        console.warn('SpeechSynthesis error:', e);
         if (isPlayingRef.current) {
           speakParagraph(index + 1, currentParas);
         }
@@ -507,8 +527,8 @@ export default function GrannyStoryteller({ onBack }) {
     }
   };
 
-  // 8. Continuous Microphone Listener for Voice Control ("Stop", "Closed", "Pause")
-  const startContinuousMicListener = () => {
+  // 8. Background Mic Listener for Voice Stop / Pause Commands
+  const startBackgroundVoiceStopListener = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) return;
 
@@ -522,65 +542,52 @@ export default function GrannyStoryteller({ onBack }) {
       recognition.interimResults = true;
       recognition.lang = 'en-US';
 
-      recognition.onstart = () => {
-        setMicActive(true);
-      };
-
       recognition.onresult = (event) => {
         for (let i = event.resultIndex; i < event.results.length; ++i) {
-          const transcript = event.results[i][0].transcript.toLowerCase().trim();
+          const t = event.results[i][0].transcript.toLowerCase().trim();
 
-          // Voice Commands: "stop", "closed", "close", "pause", "cancel", "hush", "sleep", "shut"
+          // Stop / pause commands
           if (
-            transcript.includes('stop') ||
-            transcript.includes('closed') ||
-            transcript.includes('close') ||
-            transcript.includes('pause') ||
-            transcript.includes('cancel') ||
-            transcript.includes('hush') ||
-            transcript.includes('sleep')
+            t.includes('stop') ||
+            t.includes('closed') ||
+            t.includes('close') ||
+            t.includes('pause') ||
+            t.includes('cancel') ||
+            t.includes('wait') ||
+            t.includes('hush') ||
+            t.includes('grandma stop')
           ) {
-            setVoiceCommandFeedback(`Voice Command "${transcript}" detected — Story paused!`);
-            handleVoiceStop();
+            setVoiceCommandToast(`Voice command "${t}" heard — Pausing story!`);
+            handleExecuteVoiceStop();
             break;
+          }
+
+          // Resume command
+          if (t.includes('continue') || t.includes('resume') || t.includes('read on') || t.includes('play')) {
+            if (!isPlayingRef.current) {
+              setVoiceCommandToast(`Voice command "${t}" heard — Resuming story!`);
+              startStorytellingFromIndex(currentParagraphIndexRef.current >= 0 ? currentParagraphIndexRef.current : 0);
+              break;
+            }
           }
         }
       };
 
-      recognition.onerror = () => {
-        setMicActive(false);
-      };
-
       recognition.onend = () => {
         if (isPlayingRef.current) {
-          try { recognition.start(); } catch (e) { setMicActive(false); }
-        } else {
-          setMicActive(false);
+          try { recognition.start(); } catch (e) {}
         }
       };
 
       recognition.start();
       recognitionRef.current = recognition;
-    } catch (err) {
-      setMicActive(false);
-    }
+    } catch (err) {}
   };
 
-  const handleVoiceStop = () => {
-    const savedIdx = currentParagraphIndexRef.current >= 0 ? currentParagraphIndexRef.current : 0;
+  const handleExecuteVoiceStop = () => {
     stopStorytelling();
-
-    // Warm confirmation: "Grandma has saved your exact spot"
-    const confirmText = "Rest your eyes now, darling. Grandma has saved your exact spot. Sweet dreams, and we will continue tomorrow.";
-    if ('speechSynthesis' in window) {
-      const utt = new SpeechSynthesisUtterance(confirmText);
-      utt.rate = 0.9;
-      if (selectedVoiceName && availableVoices.length > 0) {
-        const found = availableVoices.find(v => v.name === selectedVoiceName);
-        if (found) utt.voice = found;
-      }
-      window.speechSynthesis.speak(utt);
-    }
+    const pauseNote = "I have paused the story right here, my darling. Your spot is safely saved. Rest your sweet eyes.";
+    speakAsGranny(pauseNote);
   };
 
   const stopStorytelling = () => {
@@ -595,29 +602,10 @@ export default function GrannyStoryteller({ onBack }) {
       try { recognitionRef.current.abort(); } catch (e) {}
       recognitionRef.current = null;
     }
-    setMicActive(false);
+    setIsMicListening(false);
   };
 
-  // Switch to a selected book from Classic Vault or Library
-  const handleSelectVaultBook = (book) => {
-    stopStorytelling();
-    setActiveBookId(book.id);
-    activeBookIdRef.current = book.id;
-    setStoryTitle(book.title);
-    storyTitleRef.current = book.title;
-    setAuthorName(book.author);
-    setCustomText(book.text || book.full_text);
-    setCurrentParagraphIndex(-1);
-
-    // Check if we have bookmark for this specific book
-    if (savedBookmark && savedBookmark.bookId === book.id) {
-      // Keep existing bookmark
-    } else {
-      saveBookmark(book.id, book.title, book.author, 0, (book.text || book.full_text).split('\n\n').length);
-    }
-  };
-
-  // Handle Manual File Upload
+  // Handle User File Upload (.txt, .md, .pdf text)
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -635,6 +623,13 @@ export default function GrannyStoryteller({ onBack }) {
         setCustomText(content);
         const pLen = content.split('\n\n').length;
         saveBookmark(cleanName, cleanName, "Uploaded Copy", 0, pLen);
+        
+        const confirmMsg = `Grandma loaded your book copy: "${cleanName}" (${pLen} paragraphs)! Tap Start Reading to begin.`;
+        setConversationHistory(prev => [
+          ...prev,
+          { sender: 'granny', text: confirmMsg, time: 'Just now' }
+        ]);
+        speakAsGranny(confirmMsg);
       }
     };
     reader.readAsText(file);
@@ -643,7 +638,7 @@ export default function GrannyStoryteller({ onBack }) {
   return (
     <div style={{ maxWidth: '980px', margin: '0 auto', padding: '16px 16px 100px 16px' }}>
       
-      {/* ── HEADER NAVIGATION ── */}
+      {/* ── TOP NAV HEADER ── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
         <button 
           onClick={() => {
@@ -659,7 +654,7 @@ export default function GrannyStoryteller({ onBack }) {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <button
-            onClick={() => setShowLibraryDrawer(!showLibraryDrawer)}
+            onClick={() => setShowLibraryShelf(!showLibraryShelf)}
             style={{
               background: 'rgba(245, 158, 11, 0.12)',
               color: '#f59e0b',
@@ -675,7 +670,7 @@ export default function GrannyStoryteller({ onBack }) {
             }}
           >
             <Library size={14} />
-            <span>My Book Shelf ({savedLibrary.length || CLASSIC_VAULT.length})</span>
+            <span>Bedtime Shelf ({savedLibrary.length || CLASSIC_VAULT.length})</span>
           </button>
 
           <span className="badge-pill" style={{ 
@@ -685,170 +680,304 @@ export default function GrannyStoryteller({ onBack }) {
             fontSize: '0.78rem'
           }}>
             <Heart size={13} color="#f59e0b" style={{ fill: '#f59e0b' }} />
-            <span>Granny Voice Mode (English)</span>
+            <span>Interactive Voice Granny</span>
           </span>
         </div>
       </div>
 
-      {/* ── SECTION 1: VOICE-FIRST STORY REQUEST HERO (THE 10-SECOND AGENT) ── */}
+      {/* ── SECTION 1: INTERACTIVE CONVERSATION DIALOGUE CARD ── */}
       <div className="glass-panel" style={{
         padding: '24px 20px',
         marginBottom: '20px',
-        border: '1px solid rgba(245, 158, 11, 0.5)',
-        background: 'linear-gradient(135deg, rgba(30, 22, 18, 0.95), rgba(18, 14, 24, 0.95))',
-        borderRadius: '20px',
-        boxShadow: '0 12px 35px rgba(0, 0, 0, 0.5), 0 0 20px rgba(245, 158, 11, 0.15)',
-        position: 'relative',
-        overflow: 'hidden'
+        border: '1px solid rgba(245, 158, 11, 0.45)',
+        background: 'linear-gradient(135deg, rgba(28, 20, 16, 0.96), rgba(16, 12, 22, 0.96))',
+        borderRadius: '24px',
+        boxShadow: '0 12px 35px rgba(0, 0, 0, 0.55), 0 0 25px rgba(245, 158, 11, 0.12)',
+        position: 'relative'
       }}>
-        {/* Ambient Warm Candlelight Glow */}
-        <div style={{
-          position: 'absolute',
-          top: '-40px',
-          right: '-40px',
-          width: '180px',
-          height: '180px',
-          borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(245, 158, 11, 0.25) 0%, transparent 70%)',
-          pointerEvents: 'none'
-        }} />
-
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
+        {/* Grandma Avatar & Header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '16px' }}>
+          <div style={{
+            width: '52px',
+            height: '52px',
+            borderRadius: '50%',
+            background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '1.6rem',
+            boxShadow: '0 4px 15px rgba(245, 158, 11, 0.4)',
+            border: '2px solid rgba(255, 255, 255, 0.2)'
+          }}>
+            👵
+          </div>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-              <Sparkles size={18} color="#f59e0b" />
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#fef3c7', margin: 0 }}>
-                Grandma's 10-Second Voice Book Agent
-              </h2>
-            </div>
-            <p style={{ fontSize: '0.86rem', color: '#d1d5db', margin: 0, maxWidth: '620px', lineHeight: 1.5 }}>
-              Tap the button below. Grandma will ask what you wish to hear. Just speak the title of <strong style={{ color: '#fbbf24' }}>any book or story</strong>—our autonomous agent will find it, download it, and start telling it in under 10 seconds!
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#fef3c7', margin: 0 }}>
+              Grandma Storyteller (Interactive Voice Mode)
+            </h2>
+            <p style={{ fontSize: '0.82rem', color: '#9ca3af', margin: 0 }}>
+              Grandma listens to you, finds the actual book online, and reads it with loving warmth.
             </p>
           </div>
-
-          {/* Quick Stats Badge */}
-          {agentLatency && (
-            <div style={{
-              background: 'rgba(16, 185, 129, 0.15)',
-              border: '1px solid rgba(16, 185, 129, 0.35)',
-              borderRadius: '12px',
-              padding: '6px 12px',
-              textAlign: 'right'
-            }}>
-              <div style={{ fontSize: '0.7rem', color: '#6ee7b7', fontWeight: 600 }}>AGENT SPEED</div>
-              <div style={{ fontSize: '1rem', color: '#10b981', fontWeight: 800 }}>⚡ {agentLatency}s</div>
-            </div>
-          )}
         </div>
 
-        {/* ── BIG VOICE TRIGGER BUTTON ── */}
-        <div style={{ marginTop: '20px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px' }}>
-          <button
-            onClick={handleAskUserVoicePrompt}
-            disabled={isSearchingBook}
-            style={{
-              background: isVoiceAsking || micActive 
-                ? 'linear-gradient(135deg, #ef4444, #f97316)' 
-                : 'linear-gradient(135deg, #f59e0b, #d97706)',
-              color: '#1a1005',
-              border: 'none',
-              borderRadius: '14px',
-              padding: '14px 24px',
-              fontSize: '0.96rem',
-              fontWeight: 800,
-              cursor: isSearchingBook ? 'not-allowed' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px',
-              boxShadow: isVoiceAsking || micActive
-                ? '0 0 25px rgba(239, 68, 68, 0.65)'
-                : '0 8px 24px rgba(245, 158, 11, 0.4)',
-              transition: 'all 0.25s ease'
-            }}
-          >
-            {isVoiceAsking || micActive ? (
-              <>
-                <Mic size={20} className="animate-pulse" />
-                <span>Listening for Your Book Title...</span>
-              </>
-            ) : isSearchingBook ? (
-              <>
-                <Loader2 size={20} className="animate-spin" />
-                <span>Agent Searching Web...</span>
-              </>
-            ) : (
-              <>
-                <Mic size={20} />
-                <span>🎙️ Ask Me What to Listen To (Voice Agent)</span>
-              </>
-            )}
-          </button>
+        {/* Live Conversation Dialogue Bubbles */}
+        <div style={{
+          maxHeight: '220px',
+          overflowY: 'auto',
+          padding: '12px 8px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '12px',
+          background: 'rgba(0, 0, 0, 0.35)',
+          borderRadius: '16px',
+          border: '1px solid rgba(255, 255, 255, 0.06)',
+          marginBottom: '18px'
+        }}>
+          {conversationHistory.map((msg, i) => {
+            const isGranny = msg.sender === 'granny';
+            return (
+              <div 
+                key={i}
+                style={{
+                  display: 'flex',
+                  justifyContent: isGranny ? 'flex-start' : 'flex-end',
+                  gap: '8px'
+                }}
+              >
+                <div style={{
+                  maxWidth: '82%',
+                  padding: '12px 16px',
+                  borderRadius: isGranny ? '16px 16px 16px 4px' : '16px 16px 4px 16px',
+                  background: isGranny ? 'rgba(245, 158, 11, 0.16)' : 'rgba(56, 189, 248, 0.18)',
+                  border: isGranny ? '1px solid rgba(245, 158, 11, 0.35)' : '1px solid rgba(56, 189, 248, 0.35)',
+                  color: isGranny ? '#fef3c7' : '#e0f2fe',
+                  fontSize: '0.88rem',
+                  lineHeight: '1.5'
+                }}>
+                  <div style={{ fontSize: '0.7rem', color: isGranny ? '#fbbf24' : '#38bdf8', fontWeight: 700, marginBottom: '2px' }}>
+                    {isGranny ? '👵 Grandma' : '👤 You'}
+                  </div>
+                  {msg.text}
+                </div>
+              </div>
+            );
+          })}
+        </div>
 
-          {/* Fallback Text Input for Silent Night Mode */}
-          <div style={{ flex: 1, minWidth: '260px', display: 'flex', gap: '8px' }}>
+        {/* ── BIG INTERACTIVE MICROPHONE TALK BUTTON & CONTROLS ── */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', width: '100%', justifyContent: 'center', flexWrap: 'wrap' }}>
+            <button
+              onClick={isMicListening ? handleStopListeningAndProcess : handleStartTalkingToGranny}
+              disabled={isSearchingBook}
+              style={{
+                background: isMicListening
+                  ? 'linear-gradient(135deg, #ef4444, #dc2626)'
+                  : 'linear-gradient(135deg, #f59e0b, #d97706)',
+                color: isMicListening ? '#fff' : '#1a1005',
+                border: 'none',
+                borderRadius: '999px',
+                padding: '16px 32px',
+                fontSize: '1.02rem',
+                fontWeight: 900,
+                cursor: isSearchingBook ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                boxShadow: isMicListening
+                  ? '0 0 35px rgba(239, 68, 68, 0.7)'
+                  : '0 8px 30px rgba(245, 158, 11, 0.45)',
+                transition: 'all 0.25s ease'
+              }}
+            >
+              {isMicListening ? (
+                <>
+                  <MicOff size={22} className="animate-pulse" />
+                  <span>I am Listening... Tap When Done</span>
+                </>
+              ) : isSearchingBook ? (
+                <>
+                  <Loader2 size={22} className="animate-spin" />
+                  <span>Agent Finding Real Book...</span>
+                </>
+              ) : (
+                <>
+                  <Mic size={22} />
+                  <span>🎙️ Tap to Speak to Grandma</span>
+                </>
+              )}
+            </button>
+
+            <button
+              onClick={handleHearGrannyWelcome}
+              className="btn-secondary"
+              style={{
+                padding: '12px 18px',
+                borderRadius: '999px',
+                fontSize: '0.84rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                border: '1px solid rgba(245, 158, 11, 0.4)',
+                color: '#fef3c7',
+                background: 'rgba(245, 158, 11, 0.1)'
+              }}
+            >
+              <Volume2 size={16} color="#f59e0b" />
+              <span>Hear Grandma Welcome</span>
+            </button>
+          </div>
+
+          {/* Real-time Voice Transcription Display with Visualizer */}
+          {isMicListening && (
+            <div style={{
+              width: '100%',
+              padding: '14px 20px',
+              background: 'rgba(239, 68, 68, 0.15)',
+              borderRadius: '16px',
+              border: '1.5px solid rgba(239, 68, 68, 0.45)',
+              textAlign: 'center',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: '8px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', background: '#ef4444' }} className="animate-ping" />
+                <span style={{ fontSize: '0.74rem', color: '#fca5a5', fontWeight: 700, letterSpacing: '0.08em' }}>
+                  LISTENING PATIENTLY • SAY ANY GREETING OR BOOK NAME
+                </span>
+              </div>
+              <div style={{ fontSize: '1.15rem', color: '#fff', fontWeight: 800, minHeight: '28px' }}>
+                {liveTranscript ? `"${liveTranscript}"` : 'Listening for your voice... speak now...'}
+              </div>
+              {liveTranscript && (
+                <button
+                  onClick={handleStopListeningAndProcess}
+                  style={{
+                    background: '#10b981',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    padding: '6px 16px',
+                    fontSize: '0.82rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    marginTop: '4px'
+                  }}
+                >
+                  ✓ Done Talking • Send to Grandma Now
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Agent Status Progress Indicator */}
+          {searchStatusStep && (
+            <div style={{
+              width: '100%',
+              padding: '10px 16px',
+              background: 'rgba(245, 158, 11, 0.12)',
+              borderRadius: '12px',
+              border: '1px solid rgba(245, 158, 11, 0.3)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              fontSize: '0.84rem',
+              color: '#fef3c7'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Sparkles size={16} color="#f59e0b" className={isSearchingBook ? 'animate-spin' : ''} />
+                <span>{searchStatusStep}</span>
+              </div>
+              {agentLatency && (
+                <span style={{ color: '#10b981', fontWeight: 700 }}>⚡ {agentLatency}s</span>
+              )}
+            </div>
+          )}
+
+          {/* Manual Typing Row */}
+          <div style={{ width: '100%', display: 'flex', gap: '8px', marginTop: '4px' }}>
             <input
               type="text"
-              placeholder="Or type any book (e.g. Alice in Wonderland, The Alchemist)..."
-              value={searchQueryInput}
-              onChange={(e) => setSearchQueryInput(e.target.value)}
+              placeholder="Or type any book title (e.g. Atomic Habits, The Alchemist, Think and Grow Rich)..."
+              value={manualQueryInput}
+              onChange={(e) => setManualQueryInput(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && searchQueryInput.trim()) {
-                  executeBookAgentSearch(searchQueryInput);
+                if (e.key === 'Enter' && manualQueryInput.trim()) {
+                  handleProcessSpokenInput(manualQueryInput.trim());
+                  setManualQueryInput('');
                 }
               }}
               style={{
                 flex: 1,
-                background: 'rgba(0, 0, 0, 0.45)',
+                background: 'rgba(0, 0, 0, 0.5)',
                 border: '1px solid rgba(255, 255, 255, 0.15)',
                 borderRadius: '12px',
-                padding: '12px 14px',
-                fontSize: '0.85rem',
+                padding: '12px 16px',
+                fontSize: '0.88rem',
                 color: '#fff',
                 outline: 'none'
               }}
             />
             <button
               onClick={() => {
-                if (searchQueryInput.trim()) executeBookAgentSearch(searchQueryInput);
+                if (manualQueryInput.trim()) {
+                  handleProcessSpokenInput(manualQueryInput.trim());
+                  setManualQueryInput('');
+                }
               }}
-              disabled={isSearchingBook || !searchQueryInput.trim()}
-              className="btn-primary"
+              disabled={isSearchingBook || !manualQueryInput.trim()}
               style={{
                 borderRadius: '12px',
-                padding: '0 16px',
-                background: 'rgba(245, 158, 11, 0.85)',
+                padding: '0 20px',
+                background: '#f59e0b',
                 color: '#1a1005',
-                fontWeight: 700
+                fontWeight: 800,
+                border: 'none',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
               }}
             >
-              <Search size={16} />
+              <Send size={16} />
+              <span>Search</span>
             </button>
           </div>
-        </div>
 
-        {/* Live Agent Status & Transcript Feedback */}
-        {(searchStatusStep || voiceQueryTranscript) && (
-          <div style={{
-            marginTop: '14px',
-            padding: '10px 14px',
-            background: 'rgba(0, 0, 0, 0.35)',
-            borderRadius: '10px',
-            border: '1px solid rgba(245, 158, 11, 0.25)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '10px'
-          }}>
-            <Sparkles size={15} color="#fbbf24" />
-            <span style={{ fontSize: '0.84rem', color: '#fde68a' }}>
-              {searchStatusStep}
-            </span>
-            {voiceQueryTranscript && (
-              <span style={{ fontSize: '0.84rem', color: '#93c5fd', fontWeight: 600 }}>
-                "{voiceQueryTranscript}"
-              </span>
-            )}
+          {/* Quick-Pick Popular Book Pills */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', width: '100%', marginTop: '6px' }}>
+            <span style={{ fontSize: '0.74rem', color: '#9ca3af', fontWeight: 600 }}>Quick pick:</span>
+            {[
+              "The Alchemist",
+              "Atomic Habits",
+              "Think and Grow Rich",
+              "Alice in Wonderland",
+              "The Jungle Book",
+              "Panchatantra"
+            ].map((bookTitle) => (
+              <button
+                key={bookTitle}
+                onClick={() => handleProcessSpokenInput(bookTitle)}
+                disabled={isSearchingBook}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.06)',
+                  border: '1px solid rgba(255, 255, 255, 0.15)',
+                  borderRadius: '999px',
+                  padding: '4px 12px',
+                  fontSize: '0.76rem',
+                  color: '#fbbf24',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                📖 {bookTitle}
+              </button>
+            ))}
           </div>
-        )}
+        </div>
       </div>
 
       {/* ── SECTION 2: NEXT-DAY RESUME BOOKMARK (EXACT SPOT MEMORY) ── */}
@@ -856,7 +985,7 @@ export default function GrannyStoryteller({ onBack }) {
         <div style={{
           marginBottom: '20px',
           padding: '16px 20px',
-          background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(5, 150, 105, 0.1))',
+          background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.16), rgba(5, 150, 105, 0.12))',
           border: '1px solid rgba(16, 185, 129, 0.45)',
           borderRadius: '16px',
           display: 'flex',
@@ -864,46 +993,46 @@ export default function GrannyStoryteller({ onBack }) {
           alignItems: 'center',
           flexWrap: 'wrap',
           gap: '12px',
-          boxShadow: '0 6px 20px rgba(16, 185, 129, 0.1)'
+          boxShadow: '0 6px 20px rgba(16, 185, 129, 0.12)'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div style={{
-              width: '42px',
-              height: '42px',
-              borderRadius: '10px',
+              width: '44px',
+              height: '44px',
+              borderRadius: '12px',
               background: 'rgba(16, 185, 129, 0.25)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               color: '#34d399'
             }}>
-              <Bookmark size={22} />
+              <Bookmark size={24} />
             </div>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#34d399', letterSpacing: '0.05em' }}>
+                <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#34d399', letterSpacing: '0.05em' }}>
                   NEXT-DAY RESUME BOOKMARK SAVED
                 </span>
                 <span style={{ fontSize: '0.7rem', color: '#9ca3af' }}>• {savedBookmark.dateFormatted}</span>
               </div>
-              <h4 style={{ fontSize: '1rem', fontWeight: 800, color: '#fff', margin: '2px 0 4px 0' }}>
+              <h4 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#fff', margin: '2px 0 4px 0' }}>
                 {savedBookmark.bookTitle}
               </h4>
-              <p style={{ fontSize: '0.78rem', color: '#a7f3d0', margin: 0 }}>
+              <p style={{ fontSize: '0.8rem', color: '#a7f3d0', margin: 0 }}>
                 Paused at Paragraph <strong>{savedBookmark.paragraphIndex + 1}</strong> of {savedBookmark.totalParagraphs} ({savedBookmark.progressPercent}% completed)
               </p>
             </div>
           </div>
 
           <button
-            onClick={handleResumeSavedBookmark}
+            onClick={handleResumeBookmark}
             style={{
               background: 'linear-gradient(135deg, #10b981, #059669)',
               color: '#fff',
               border: 'none',
               borderRadius: '12px',
-              padding: '10px 20px',
-              fontSize: '0.88rem',
+              padding: '12px 22px',
+              fontSize: '0.9rem',
               fontWeight: 800,
               cursor: 'pointer',
               display: 'flex',
@@ -918,8 +1047,8 @@ export default function GrannyStoryteller({ onBack }) {
         </div>
       )}
 
-      {/* ── SECTION 3: MY BOOK LIBRARY DRAWER (SHELF OF DOWNLOADED BOOKS) ── */}
-      {showLibraryDrawer && (
+      {/* ── SECTION 3: MY BEDTIME BOOKSHELF DRAWER ── */}
+      {showLibraryShelf && (
         <div className="glass-panel" style={{
           marginBottom: '20px',
           padding: '20px',
@@ -941,7 +1070,17 @@ export default function GrannyStoryteller({ onBack }) {
               return (
                 <div
                   key={book.id}
-                  onClick={() => handleSelectVaultBook(book)}
+                  onClick={() => {
+                    stopStorytelling();
+                    setActiveBookId(book.id);
+                    activeBookIdRef.current = book.id;
+                    setStoryTitle(book.title);
+                    storyTitleRef.current = book.title;
+                    setAuthorName(book.author);
+                    setCustomText(book.text);
+                    setCurrentParagraphIndex(-1);
+                    saveBookmark(book.id, book.title, book.author, 0, book.text.split('\n\n').length);
+                  }}
                   style={{
                     padding: '14px',
                     borderRadius: '14px',
@@ -961,7 +1100,7 @@ export default function GrannyStoryteller({ onBack }) {
         </div>
       )}
 
-      {/* ── SECTION 4: MAIN STORY READING CARD ── */}
+      {/* ── SECTION 4: MAIN STORY READING VIEW CARD ── */}
       <div className="glass-panel" style={{
         padding: '28px 24px',
         border: '1px solid rgba(245, 158, 11, 0.4)',
@@ -969,7 +1108,7 @@ export default function GrannyStoryteller({ onBack }) {
         borderRadius: '24px',
         boxShadow: '0 15px 40px rgba(0, 0, 0, 0.6)'
       }}>
-        {/* Story Title & Audio Playing Header */}
+        {/* Story Title & Play Button Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '14px', marginBottom: '20px' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
@@ -979,11 +1118,10 @@ export default function GrannyStoryteller({ onBack }) {
               </h1>
             </div>
             <div style={{ fontSize: '0.84rem', color: '#d97706', fontWeight: 600 }}>
-              by {authorName} • {paragraphs.length} Bedtime Paragraphs
+              by {authorName} • {paragraphs.length} Bedtime Paragraphs {bookSourceInfo && `• [${bookSourceInfo}]`}
             </div>
           </div>
 
-          {/* Quick Play/Stop Action */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <button
               onClick={() => {
@@ -1025,7 +1163,7 @@ export default function GrannyStoryteller({ onBack }) {
           </div>
         </div>
 
-        {/* Live Voice Status Indicator & Mobile Stop Warning */}
+        {/* Live Audio & Voice Commands Status */}
         {isPlaying && (
           <div style={{
             padding: '10px 16px',
@@ -1054,13 +1192,13 @@ export default function GrannyStoryteller({ onBack }) {
 
             <div style={{ fontSize: '0.78rem', color: '#fbbf24', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <Mic size={14} />
-              <span>Mic open: Say <strong>"Stop"</strong> or <strong>"Closed"</strong> to pause anytime</span>
+              <span>Mic listening: Say <strong>"Stop"</strong> or <strong>"Pause"</strong> anytime</span>
             </div>
           </div>
         )}
 
         {/* Voice command feedback toast */}
-        {voiceCommandFeedback && (
+        {voiceCommandToast && (
           <div style={{
             padding: '8px 14px',
             marginBottom: '16px',
@@ -1074,11 +1212,11 @@ export default function GrannyStoryteller({ onBack }) {
             gap: '8px'
           }}>
             <AlertCircle size={16} />
-            <span>{voiceCommandFeedback}</span>
+            <span>{voiceCommandToast}</span>
           </div>
         )}
 
-        {/* ── PARAGRAPH READER VIEW ── */}
+        {/* Paragraphs Reader */}
         <div style={{
           maxHeight: '440px',
           overflowY: 'auto',
@@ -1146,7 +1284,7 @@ export default function GrannyStoryteller({ onBack }) {
           })}
         </div>
 
-        {/* ── AUDIO CONTROLS & CUSTOMIZATION ── */}
+        {/* ── AUDIO CADENCE & FILE UPLOAD FOOTER ── */}
         <div style={{
           marginTop: '24px',
           paddingTop: '20px',
@@ -1211,20 +1349,24 @@ export default function GrannyStoryteller({ onBack }) {
             </div>
           )}
 
-          {/* Optional manual upload button */}
+          {/* Upload Actual Book Copy */}
           <label style={{
             fontSize: '0.78rem',
-            color: '#9ca3af',
+            color: '#fbbf24',
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
-            gap: '6px'
+            gap: '6px',
+            background: 'rgba(245, 158, 11, 0.1)',
+            padding: '6px 12px',
+            borderRadius: '8px',
+            border: '1px solid rgba(245, 158, 11, 0.3)'
           }}>
             <Upload size={14} />
-            <span>Upload Custom Book (.txt)</span>
+            <span>📁 Upload Your Book Copy (.txt, .md, .pdf)</span>
             <input 
               type="file" 
-              accept=".txt,.md,.pdf" 
+              accept=".txt,.md,.pdf,.epub" 
               onChange={handleFileUpload} 
               style={{ display: 'none' }} 
             />

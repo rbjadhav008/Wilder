@@ -73,12 +73,125 @@ export async function fetchMT5Status() {
 }
 
 export async function searchBookAgent(query) {
+  // 1. Try Primary Cloud/Local AI Backend
   try {
-    const res = await fetch(`${API_BASE_URL}/api/book_agent?query=${encodeURIComponent(query)}`);
-    if (!res.ok) throw new Error('Book agent request error');
-    return await res.json();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
+    const res = await fetch(`${API_BASE_URL}/api/book_agent?query=${encodeURIComponent(query)}`, {
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.success && data.full_text && data.paragraphs?.length >= 5) {
+        return data;
+      }
+    }
   } catch (err) {
-    console.warn('Backend book agent unavailable, using direct client agent:', err);
-    return null;
+    console.warn('Backend book agent unavailable or slow, activating direct client library agent...', err);
   }
+
+  // 2. Direct Client-Side Fallback: Gutendex (Project Gutenberg 75,000+ Unabridged Books with CORS)
+  try {
+    const cleanQ = query.replace(/^(can you|please|read|tell me|i want to listen to|i want to hear|play|the story of)\s+/i, '').trim();
+    const gRes = await fetch(`https://gutendex.com/books/?search=${encodeURIComponent(cleanQ)}`);
+    if (gRes.ok) {
+      const gData = await gRes.json();
+      if (gData.results && gData.results.length > 0) {
+        const book = gData.results[0];
+        const formats = book.formats || {};
+        const txtUrl = formats['text/plain; charset=utf-8'] || formats['text/plain'] || formats['text/plain; charset=us-ascii'];
+        if (txtUrl) {
+          const txtRes = await fetch(txtUrl);
+          if (txtRes.ok) {
+            const rawText = await txtRes.text();
+            if (rawText && rawText.length > 10000) {
+              const paras = cleanClientBookText(rawText);
+              if (paras.length >= 8) {
+                const author = book.authors?.[0]?.name || 'Classic Author';
+                return {
+                  success: true,
+                  title: book.title,
+                  author: author,
+                  source: `Project Gutenberg Official Unabridged (#${book.id})`,
+                  full_text: paras.join('\n\n'),
+                  paragraphs: paras,
+                  total_paragraphs: paras.length
+                };
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch (gErr) {
+    console.warn('Direct Gutendex search error:', gErr);
+  }
+
+  // 3. Direct Client-Side Fallback: Internet Archive Global Library (CORS Enabled)
+  try {
+    const cleanQ = query.replace(/^(can you|please|read|tell me|i want to listen to|i want to hear|play|the story of)\s+/i, '').trim();
+    const iaUrl = `https://archive.org/advancedsearch.php?q=title:(${encodeURIComponent('"' + cleanQ + '"')}) AND mediatype:(texts)&fl[]=identifier,title,creator&rows=3&output=json`;
+    const iaRes = await fetch(iaUrl);
+    if (iaRes.ok) {
+      const iaData = await iaRes.json();
+      const docs = iaData.response?.docs || [];
+      for (const doc of docs) {
+        const ident = doc.identifier;
+        if (!ident) continue;
+        const metaRes = await fetch(`https://archive.org/metadata/${ident}/files`);
+        if (metaRes.ok) {
+          const metaData = await metaRes.json();
+          const files = metaData.result || [];
+          const txtFile = files.find(f => f.name && f.name.endsWith('_djvu.txt')) ||
+                          files.find(f => f.name && f.name.endsWith('.txt') && parseInt(f.size || 0) > 25000);
+          if (txtFile) {
+            const dlRes = await fetch(`https://archive.org/download/${ident}/${encodeURIComponent(txtFile.name)}`);
+            if (dlRes.ok) {
+              const rawText = await dlRes.text();
+              if (rawText && rawText.length > 12000) {
+                const paras = cleanClientBookText(rawText);
+                if (paras.length >= 8) {
+                  return {
+                    success: true,
+                    title: doc.title || cleanQ,
+                    author: doc.creator || 'Renowned Author',
+                    source: 'Internet Archive Global Library (Direct Unabridged)',
+                    full_text: paras.join('\n\n'),
+                    paragraphs: paras,
+                    total_paragraphs: paras.length
+                  };
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch (iaErr) {
+    console.warn('Direct Internet Archive search error:', iaErr);
+  }
+
+  return null;
 }
+
+function cleanClientBookText(rawText) {
+  if (!rawText) return [];
+  let t = rawText;
+  const startMatch = t.search(/(\*\*\*\s*START OF (THE|THIS) PROJECT GUTENBERG|\bCHAPTER\s+1\b|\bCHAPTER\s+I\b|\bPROLOGUE\b|\bBOOK\s+ONE\b|\bINTRODUCTION\b|PART\s+ONE)/i);
+  if (startMatch !== -1) t = t.substring(startMatch);
+  const endMatch = t.search(/(\*\*\*\s*END OF (THE|THIS) PROJECT GUTENBERG|Transcriber's Notes|End of the Project Gutenberg)/i);
+  if (endMatch !== -1) t = t.substring(0, endMatch);
+
+  const rawParas = t.split(/\n\s*\n/);
+  const paras = [];
+  for (const p of rawParas) {
+    const cleaned = p.replace(/\s+/g, ' ').trim();
+    if (cleaned.length >= 45 && !cleaned.includes('***')) {
+      paras.push(cleaned);
+      if (paras.length >= 200) break;
+    }
+  }
+  return paras;
+}
+
